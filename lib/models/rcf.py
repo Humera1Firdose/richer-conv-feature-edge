@@ -6,7 +6,6 @@
 import numpy as np
 import tensorflow as tf
 from tensorcv.models.layers import *
-from tensorcv.models.base import BaseModel
 
 import lib.models.layers as L
 from lib.models.vgg import BaseVGG16

@@ -18,7 +18,7 @@ def transpose_conv(x,
                    use_bias=True,
                    stride=2,
                    padding='SAME',
-                   trainable=False,
+                   trainable=True,
                    nl=tf.identity,
                    name='dconv'):
 
@@ -45,7 +45,7 @@ def transpose_conv(x,
                                   initializer=init_w,
                                   trainable=trainable)
         biases = tf.get_variable('biases',
-                                 [in_dim],
+                                 [out_dim],
                                  initializer=init_b,
                                  trainable=trainable)
         
