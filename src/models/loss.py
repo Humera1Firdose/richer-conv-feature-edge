@@ -6,7 +6,7 @@
 import tensorflow as tf
 
 def  class_balanced_cross_entropy_with_logits(
-    logits, label, name='class_balanced_cross_entropy'):
+        logits, label, name='class_balanced_cross_entropy'):
     '''
     original from 'Holistically-Nested Edge Detection (CVPR 15)'
     '''

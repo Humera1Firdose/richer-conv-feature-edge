@@ -7,8 +7,34 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.framework import add_arg_scope
 
-from tensorcv.models.layers import *
+# from tensorcv.models.layers import *
 
+def get_shape4D(in_val):
+    """
+    Return a 4D shape
+    Args:
+        in_val (int or list with length 2)
+    Returns:
+        list with length 4
+    """
+    # if isinstance(in_val, int):
+    return [1] + get_shape2D(in_val) + [1]
+
+def get_shape2D(in_val):
+    """
+    Return a 2D shape 
+    Args:
+        in_val (int or list with length 2) 
+    Returns:
+        list with length 2
+    """
+    in_val = int(in_val)
+    if isinstance(in_val, int):
+        return [in_val, in_val]
+    if isinstance(in_val, list):
+        assert len(in_val) == 2
+        return in_val
+    raise RuntimeError('Illegal shape: {}'.format(in_val))
 
 @add_arg_scope
 def transpose_conv(x,
@@ -20,8 +46,9 @@ def transpose_conv(x,
                    padding='SAME',
                    trainable=True,
                    nl=tf.identity,
+                   init_w = None,
+                   init_b = tf.zeros_initializer(),
                    name='dconv'):
-
     stride = get_shape4D(stride)
 
     in_dim = x.get_shape().as_list()[-1]
@@ -38,8 +65,7 @@ def transpose_conv(x,
     filter_shape = get_shape2D(filter_size) + [out_dim, in_dim]
 
     with tf.variable_scope(name) as scope:
-        init_w = tf.keras.initializers.he_normal()
-        init_b = tf.zeros_initializer()
+        
         weights = tf.get_variable('weights',
                                   filter_shape,
                                   initializer=init_w,
@@ -66,22 +92,44 @@ def upsample_deconv(x,
                     filter_size,
                     up_level,
                     out_dim,
+                    # stride=2,
                     trainable=True,
                     nl=tf.identity,
+                    init_w=None,
+                    init_b=tf.zeros_initializer(),
                     name='deconv_upsample'):
-
+    
+    # if stride == 4:
+    #     up_level = int(up_level / 2)
     with tf.variable_scope(name):
         cur_input = x
-        for level_id in range(0, up_level):
-            cur_input = transpose_conv(
+        factor = 2 ** up_level
+        
+        filter_size = 2 * factor - factor % 2
+        print(filter_size)
+        cur_input = transpose_conv(
                 cur_input,
                 filter_size=filter_size,
                 out_dim=out_dim,
-                stride=2,
+                stride=factor,
                 padding='SAME',
                 trainable=trainable,
-                nl=nl,
-                name='dconv_{}'.format(level_id))
+                init_w=init_w,
+                init_b=init_b,
+                # nl=tf.nn.relu,
+                name='dconv')
+        # for level_id in range(0, up_level):
+        #     cur_input = transpose_conv(
+        #         cur_input,
+        #         filter_size=filter_size,
+        #         out_dim=out_dim,
+        #         stride=2,
+        #         padding='SAME',
+        #         trainable=trainable,
+        #         init_w=init_w,
+        #         init_b=init_b,
+        #         # nl=tf.nn.relu,
+        #         name='dconv_{}'.format(level_id))
         return cur_input
 
 # https://github.com/tensorflow/tensorflow/pull/16885
@@ -175,6 +223,88 @@ def max_pool(x,
             strides=stride, 
             padding=padding,
             name=name), None
+
+@add_arg_scope
+def conv(filter_size,
+         out_dim,
+         layer_dict,
+         inputs=None,
+         pretrained_dict=None,
+         stride=1,
+         dilations=[1, 1, 1, 1],
+         bn=False,
+         nl=tf.identity,
+         init_w=None,
+         init_b=tf.zeros_initializer(),
+         padding='SAME',
+         pad_type='ZERO',
+         trainable=True,
+         is_training=None,
+         wd=0,
+         name='conv'):
+    if inputs is None:
+        inputs = layer_dict['cur_input']
+    stride = get_shape4D(stride)
+    in_dim = inputs.get_shape().as_list()[-1]
+    filter_shape = get_shape2D(filter_size) + [in_dim, out_dim]
+
+    if padding == 'SAME' and pad_type == 'REFLECT':
+        pad_size_1 = int((filter_shape[0] - 1) / 2)
+        pad_size_2 = int((filter_shape[1] - 1) / 2)
+        inputs = tf.pad(
+            inputs,
+            [[0, 0], [pad_size_1, pad_size_1], [pad_size_2, pad_size_2], [0, 0]],
+            "REFLECT")
+        padding = 'VALID'
+
+    with tf.variable_scope(name):
+        if wd > 0:
+            regularizer = tf.contrib.layers.l2_regularizer(scale=wd)
+        else:
+            regularizer=None
+
+        if pretrained_dict is not None and name in pretrained_dict:
+            try:
+                load_w = pretrained_dict[name][0]
+                load_b = pretrained_dict[name][1]
+            except KeyError:
+                load_w = pretrained_dict[name]['weights']
+                load_b = pretrained_dict[name]['biases']
+            print('Load {} weights!'.format(name))
+            print('Load {} biases!'.format(name))
+
+            load_w = np.reshape(load_w, filter_shape)
+            init_w = tf.constant_initializer(load_w)
+
+            load_b = np.reshape(load_b, [out_dim])
+            init_b = tf.constant_initializer(load_b)
+
+        weights = tf.get_variable('weights',
+                                  filter_shape,
+                                  initializer=init_w,
+                                  trainable=trainable,
+                                  regularizer=regularizer)
+        biases = tf.get_variable('biases',
+                                 [out_dim],
+                                 initializer=init_b,
+                                 trainable=trainable)
+
+        outputs = tf.nn.conv2d(inputs,
+                               filter=weights,
+                               strides=stride,
+                               padding=padding,
+                               use_cudnn_on_gpu=True,
+                               data_format="NHWC",
+                               dilations=dilations,
+                               name='conv2d')
+        outputs += biases
+
+        # if bn is True:
+        #     outputs = layers.batch_norm(outputs, train=is_training, name='bn')
+
+        layer_dict['cur_input'] = nl(outputs)
+        layer_dict[name] = layer_dict['cur_input']
+        return layer_dict['cur_input']
 
 
 
