@@ -45,7 +45,7 @@ if __name__ == '__main__':
         # normalize_fnc=identity,
         )
 
-    train_data.setup(epoch_val=0, batch_size=1)
+    train_data.setup(epoch_val=0, batch_size=10)
     
     # batch_data = train_data.next_batch_dict()
     
@@ -61,7 +61,7 @@ if __name__ == '__main__':
 
     # # loss_op = model.get_loss()
     # # train_op = model.get_train_op()
-    trainer = Trainer(model, train_data, init_lr=1e-3)
+    trainer = Trainer(model, train_data, init_lr=5e-3)
     writer = tf.summary.FileWriter(SAVE_PATH)
 
     sessconfig = tf.ConfigProto()
@@ -70,8 +70,8 @@ if __name__ == '__main__':
         sess.run(tf.global_variables_initializer())
         writer.add_graph(sess.graph)
 
-        for i in range(0, 10):
-            trainer.train_epoch(sess, summary_writer=None)
+        for i in range(0, 5000):
+            trainer.train_epoch(sess, summary_writer=writer)
             # batch_data = train_data.next_batch_data()
             # _, loss = sess.run(
             #     [train_op, loss_op],
@@ -82,4 +82,4 @@ if __name__ == '__main__':
             #                })
             # print(loss)
 
-    writer.close()
+        writer.close()
