@@ -3,20 +3,33 @@
 # File: rcfedge.py
 # Author: Qian Ge <geqian1001@gmail.com>
 
+import platform
 import numpy as np
 import scipy.misc
 import tensorflow as tf
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 import sys
 sys.path.append('../')
 
-from lib.models.rcf import RCF
-from lib.dataflow.bsd import BSDS500HED
+from src.models.rcf import RCF
+from src.helper.trainer import Trainer
+from src.dataflow.bsd import BSDS500HED
 
-VGG_PATH = '/Users/gq/workspace/Dataset/pretrained/vgg16.npy'
-SAVE_PATH = '/Users/gq/workspace/output/rcf/'
-DATA_PATH = '/Users/gq/workspace/Dataset/BSR_bsds500/BSR/BSDS500/data/'
+if platform.node() == 'arostitan':
+    DATA_PATH = '/home/qge2/workspace/data/dataset/BSR_bsds500/BSR/BSDS500/data/'
+    SAVE_PATH = '/home/qge2/workspace/data/out/rich/'
+    VGG_PATH = '/home/qge2/workspace/data/pretrain/vgg/vgg16.npy'
+elif platform.node() == 'Qians-MacBook-Pro.local':
+    VGG_PATH = '/Users/gq/workspace/Dataset/pretrained/vgg16.npy'
+    SAVE_PATH = '/Users/gq/workspace/output/rcf/'
+    DATA_PATH = '/Users/gq/workspace/Dataset/BSR_bsds500/BSR/BSDS500/data/'
+else:
+    pass
+    # DATA_PATH = 'E:/GITHUB/workspace/topologyseg/synthetic_foram/CNN_sythetic/'
+    # # DATA_PATH = 'Q:/My Drive/Foram/Training/CNN_sythetic/'
+    # SAVE_PATH = 'E:/tmp/seg/'
+
 
 def resize_im(im):
     return scipy.misc.imresize(im, [224, 224])
@@ -26,13 +39,15 @@ if __name__ == '__main__':
         name='train', 
         data_dir=DATA_PATH, 
         shuffle=True, 
-        pf=resize_im,
+        pf_list=[resize_im, resize_im],
+        batch_dict_name=['image', 'label']
         # is_mask=False,
         # normalize_fnc=identity,
         )
+
     train_data.setup(epoch_val=0, batch_size=1)
     
-    # batch_data = train_data.next_batch_data()
+    # batch_data = train_data.next_batch_dict()
     
     # print(batch_data['label'].shape)
     # plt.figure()
@@ -44,9 +59,9 @@ if __name__ == '__main__':
     model = RCF(n_channel=3, vgg_path=VGG_PATH)
     model.create_model()
 
-    loss_op = model.get_loss()
-    train_op = model.get_train_op()
-
+    # # loss_op = model.get_loss()
+    # # train_op = model.get_train_op()
+    trainer = Trainer(model, train_data, init_lr=1e-3)
     writer = tf.summary.FileWriter(SAVE_PATH)
 
     sessconfig = tf.ConfigProto()
@@ -56,14 +71,15 @@ if __name__ == '__main__':
         writer.add_graph(sess.graph)
 
         for i in range(0, 10):
-            batch_data = train_data.next_batch_data()
-            _, loss = sess.run(
-                [train_op, loss_op],
-                feed_dict={
-                           model.lr: 1e-6,
-                           model.raw_image: batch_data['image'],
-                           model.label: batch_data['label'],
-                           })
-            print(loss)
+            trainer.train_epoch(sess, summary_writer=None)
+            # batch_data = train_data.next_batch_data()
+            # _, loss = sess.run(
+            #     [train_op, loss_op],
+            #     feed_dict={
+            #                model.lr: 1e-6,
+            #                model.raw_image: batch_data['image'],
+            #                model.label: batch_data['label'],
+            #                })
+            # print(loss)
 
     writer.close()
