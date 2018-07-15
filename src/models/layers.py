@@ -3,6 +3,7 @@
 # File: layers.py
 # Author: Qian Ge <geqian1001@gmail.com>
 
+import math
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.framework import add_arg_scope
@@ -48,6 +49,7 @@ def transpose_conv(x,
                    nl=tf.identity,
                    init_w = None,
                    init_b = tf.zeros_initializer(),
+                   constant_init=False,
                    name='dconv'):
     stride = get_shape4D(stride)
 
@@ -65,7 +67,6 @@ def transpose_conv(x,
     filter_shape = get_shape2D(filter_size) + [out_dim, in_dim]
 
     with tf.variable_scope(name) as scope:
-        
         weights = tf.get_variable('weights',
                                   filter_shape,
                                   initializer=init_w,
@@ -87,6 +88,85 @@ def transpose_conv(x,
         output.set_shape([None, None, None, out_dim])
         output = nl(output, name='output')
         return output
+
+def upsampling_deconv(factor,
+                      out_dim,
+                      layer_dict,
+                      inputs=None,
+                      multlayer=False,
+                      trainable=True,
+                      nl=tf.identity,
+                      init_w=None,
+                      init_b=tf.zeros_initializer(),
+                      bilinear_init=True,
+                      name='deconv_upsample'):
+    """
+    in_dim has to be equal to out_dim
+    """
+    with tf.variable_scope(name):
+        if inputs is not None:
+            layer_dict['cur_input'] = inputs
+        if factor == 1:
+            return layer_dict['cur_input']
+
+        factor = int(factor)
+        if multlayer == False:
+            n_layer = 1
+            filter_size = int(2 * factor - factor % 2)
+            factor_list = [factor]
+        else:
+            n_layer = int(math.log(factor, 2))
+            filter_size = 4
+            factor_list = [2 for i in range(0, n_layer)]
+
+        for layer_id, factor in enumerate(factor_list):
+            constant_init = False
+            if bilinear_init:
+                init_w = bilinear_filter(filter_size, out_dim)
+                # init_w = tf.convert_to_tensor(init_w)
+                init_w = tf.constant_initializer(init_w)
+                constant_init = True
+
+            layer_dict['cur_input'] = transpose_conv(
+                layer_dict['cur_input'],
+                filter_size=filter_size,
+                out_dim=out_dim,
+                stride=factor,
+                padding='SAME',
+                trainable=trainable,
+                init_w=init_w,
+                init_b=init_b,
+                constant_init=constant_init,
+                nl=nl,
+                name='dconv_{}'.format(layer_id))
+        return layer_dict['cur_input']
+
+def bilinear_filter(filter_size, n_channel):
+    """
+    Make a 2D bilinear kernel suitable for upsampling of the given (h, w) size.
+    Create weights matrix for transposed convolution with bilinear filter
+    initialization.
+    Borrow from :
+    http://warmspringwinds.github.io/tensorflow/tf-slim/2016/11/22/upsampling-and-image-segmentation-with-tensorflow-and-tf-slim/
+    """
+    factor = (filter_size + 1) // 2
+    if filter_size % 2 == 1:
+        center = factor - 1
+    else:
+        center = factor - 0.5
+    og = np.ogrid[:filter_size, :filter_size]
+    upsample_kernel = (1 - abs(og[0] - center) / factor) * \
+           (1 - abs(og[1] - center) / factor)
+
+    weights = np.zeros((filter_size,
+                        filter_size,
+                        n_channel,
+                        n_channel), dtype=np.float32)
+        
+    for i in range(0, n_channel):
+        weights[:, :, i, i] = upsample_kernel
+
+    return np.reshape(weights, [filter_size, filter_size, n_channel, n_channel])
 
 def upsample_deconv(x,
                     filter_size,
@@ -118,18 +198,7 @@ def upsample_deconv(x,
                 init_b=init_b,
                 # nl=tf.nn.relu,
                 name='dconv')
-        # for level_id in range(0, up_level):
-        #     cur_input = transpose_conv(
-        #         cur_input,
-        #         filter_size=filter_size,
-        #         out_dim=out_dim,
-        #         stride=2,
-        #         padding='SAME',
-        #         trainable=trainable,
-        #         init_w=init_w,
-        #         init_b=init_b,
-        #         # nl=tf.nn.relu,
-        #         name='dconv_{}'.format(level_id))
+
         return cur_input
 
 # https://github.com/tensorflow/tensorflow/pull/16885
@@ -236,6 +305,7 @@ def conv(filter_size,
          nl=tf.identity,
          init_w=None,
          init_b=tf.zeros_initializer(),
+         use_bias=True,
          padding='SAME',
          pad_type='ZERO',
          trainable=True,
@@ -284,10 +354,6 @@ def conv(filter_size,
                                   initializer=init_w,
                                   trainable=trainable,
                                   regularizer=regularizer)
-        biases = tf.get_variable('biases',
-                                 [out_dim],
-                                 initializer=init_b,
-                                 trainable=trainable)
 
         outputs = tf.nn.conv2d(inputs,
                                filter=weights,
@@ -297,7 +363,23 @@ def conv(filter_size,
                                data_format="NHWC",
                                dilations=dilations,
                                name='conv2d')
-        outputs += biases
+
+        if use_bias:
+            if pretrained_dict is not None and name in pretrained_dict:
+                try:
+                    load_b = pretrained_dict[name][1]
+                except KeyError:
+                    load_b = pretrained_dict[name]['biases']
+                print('Load {} biases!'.format(name))
+
+                load_b = np.reshape(load_b, [out_dim])
+                init_b = tf.constant_initializer(load_b)
+
+            biases = tf.get_variable('biases',
+                                 [out_dim],
+                                 initializer=init_b,
+                                 trainable=trainable)
+            outputs += biases
 
         # if bn is True:
         #     outputs = layers.batch_norm(outputs, train=is_training, name='bn')

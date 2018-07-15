@@ -4,6 +4,7 @@
 # Author: Qian Ge <geqian1001@gmail.com>
 
 import platform
+import argparse
 import numpy as np
 import scipy.misc
 import tensorflow as tf
@@ -30,11 +31,17 @@ else:
     # # DATA_PATH = 'Q:/My Drive/Foram/Training/CNN_sythetic/'
     # SAVE_PATH = 'E:/tmp/seg/'
 
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--lr', default=0.0005, type=float)
+
+    return parser.parse_args()
 
 def resize_im(im):
     return scipy.misc.imresize(im, [224, 224])
 
 if __name__ == '__main__':
+    FLAGS = get_args()
     train_data = BSDS500HED(
         name='train', 
         data_dir=DATA_PATH, 
@@ -56,12 +63,12 @@ if __name__ == '__main__':
     # plt.figure()
     # plt.imshow(batch_data['label'][0])
     # plt.show()
-    model = RCF(n_channel=3, vgg_path=VGG_PATH)
+    model = RCF(n_channel=3, vgg_path=VGG_PATH, vgg_trainable=True)
     model.create_model()
 
     # # loss_op = model.get_loss()
     # # train_op = model.get_train_op()
-    trainer = Trainer(model, train_data, init_lr=5e-3)
+    trainer = Trainer(model, train_data, init_lr=FLAGS.lr)
     writer = tf.summary.FileWriter(SAVE_PATH)
 
     sessconfig = tf.ConfigProto()
